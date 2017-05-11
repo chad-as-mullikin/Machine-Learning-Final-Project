@@ -1,0 +1,99 @@
+---
+title: "Prediction of Training Events"
+author: "Chad A.S. Mullikin"
+date: "11/05/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+We have been presented with data related to measurements taken from fitness devices while users were performing a set of exercises. These data describe the physical motion of the device during the activity and include values such as acceleration, roll, pitch, yaw, as well as gyroscopic measurements. One column of the data refers to the manner in which the set of exercises were done and the categorical possibilities include A,B,C,D, and E. Our goal will be to build a machine learning application that will be able to take a row of data and predict which of the categories, A,B,C,D, or E, the row of data relates to. We will be using the caret package for our model, and in particular will be relying on a random forest as they appear to offer quite good results for building classifiers. 
+
+## Data Exploration
+
+We begin by simply reading in the data with the assumption that the working directory is set to the directory containing the files <code>pml-training.csv</code> and <code>pml-testing.csv</code>. We note that there are a couple of ways in which an <code>NA</code> value occur and we label them appropriately.
+
+```{r}
+library(caret)
+set.seed(25253)
+trainSet <- read.table( "pml-training.csv", header = TRUE, sep=",", na.strings=c("NA", "#DIV/0!"))
+testSet <- read.table( "pml-testing.csv", header = TRUE, sep=",", na.strings=c("NA", "#DIV/0!"))
+```
+
+To try to make our analysis more simple, we will parse the data and remove any column containing any values labeled as <code>NA</code> and then take a look at what remains. 
+
+```{r}
+trainSetNoNA<-trainSet[ , apply(trainSet, 2, function(x) !any(is.na(x)))]
+names(trainSetNoNA)
+```
+
+Similarly, we will remove the first seven columns from consideration as they contain variables which do not pertain to physical measurements taken by the instruments. 
+
+```{r}
+trainSetFinal <- trainSetNoNA[,c(8:60)]
+```
+
+Now that we have our training data defined, we will make sure that we have consistency between our training data and test data.
+
+```{r}
+testSetFinal <- testSet[ , which(names(testSet) %in% names(trainSetFinal))]
+```
+
+## Building the Random Forest With Cross Validation
+
+Here we will be breaking up our working set of data, <code>testSetFinal</code>, into a training set of 70% of our data and a test set of the remaining 30% of our data using methods discussed in class. 
+
+```{r}
+inTrain <- createDataPartition(y=trainSetFinal$classe, p=0.7, list=FALSE)
+experimentTrain <- trainSetFinal[inTrain,]
+experimentTest <- trainSetFinal[-inTrain,]
+```
+
+We are now in a position to construct our random forest. In an effort to increase both accuracy with our training set as well as decrease error when our model is used to classify other data, such as our test set, we make use of cross validation. We will break up our inTrain set into seven pieces and build models for each of those and then average the results. This process is opaque to use however, because it is done by simply adding the parameter <code>method="cv"</code> to our caret function call. We note that we will be using a fixed seed so that our results are reproducible and that this computation takes a considerable amount of time (a little over an hour). 
+
+```{r}
+time_1 <- proc.time()
+modFit <- train(classe~., 
+                data=experimentTrain, 
+                method="rf", 
+                trControl=trainControl(method="cv", 
+                                       number=7, 
+                                       allowParallel=TRUE, 
+                                       verboseIter=FALSE),
+                prox=TRUE)
+time_2 <- proc.time()
+runTime <- time_2 - time_1
+print(runTime)
+modFit
+```
+
+## Exploration of Model Accuracy
+
+```{r}
+predTrain <- predict(modFit, experimentTrain )
+predTrainConfData <- confusionMatrix( predTrain, experimentTrain$classe)
+predTrainConfData$overall
+predTrainConfData$table
+```
+
+And lastly, we check to see the performance of our model on our test data.
+
+```{r}
+predTest <- predict(modFit, experimentTest )
+predTestConfData <- confusionMatrix( predTest, experimentTest$classe)
+predTestConfData$overall
+predTestConfData$table
+```
+
+## Final Prediction
+
+As we can see, our model correctly classifies our data with reasonably high accuracy. We finish with our predictions on the test data. We predict that the out of sample error will be relatively low. I.e., we expect to misclassify somewhere around 2-3 samples.
+
+```{r}
+predFinal<-predict(modFit, newdata=testSetFinal)
+predFinal
+```
